@@ -694,7 +694,7 @@ const HomeView = () => {
   );
 };
 
-const WorkerListView = () => {
+const WorkerListView = ({ currentUser }: { currentUser: FirebaseUser | null }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -769,6 +769,15 @@ const WorkerListView = () => {
     });
   }, [workers, selectedDistrict, selectedArea, search]);
 
+  const handleWorkerClick = (workerUid: string) => {
+    if (!currentUser) {
+      toast.error('Please login to view worker details');
+      navigate('/login');
+      return;
+    }
+    navigate(`/worker/${workerUid}`);
+  };
+
   return (
     <div className="pt-20 pb-24 px-4 max-w-lg mx-auto">
       <div className="flex flex-col gap-4 mb-6">
@@ -830,7 +839,7 @@ const WorkerListView = () => {
               key={worker.uid}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              onClick={() => navigate(`/worker/${worker.uid}`)}
+              onClick={() => handleWorkerClick(worker.uid)}
               className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4 cursor-pointer"
             >
               <div className="w-16 h-16 bg-orange-100 rounded-xl flex items-center justify-center text-orange-600 font-bold text-xl">
@@ -844,7 +853,7 @@ const WorkerListView = () => {
                 </div>
                 <div className="flex items-center gap-1 text-xs text-gray-400 mb-1">
                   <Phone size={10} />
-                  <span>{worker.phone}</span>
+                  <span>{currentUser ? worker.phone : '••••••••••'}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1 text-xs font-bold text-yellow-600">
@@ -877,6 +886,12 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!currentUser) {
+      toast.error('Please login to view worker details');
+      navigate('/login');
+      return;
+    }
+
     if (!id) return;
     const fetchWorker = async () => {
       try {
@@ -890,7 +905,7 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
       }
     };
     fetchWorker();
-  }, [id]);
+  }, [id, currentUser, navigate]);
 
   const handleBooking = async () => {
     if (!currentUser) {
@@ -1566,7 +1581,7 @@ export default function App() {
           <AnimatePresence mode="wait">
             <Routes>
               <Route path="/" element={<HomeView />} />
-              <Route path="/workers" element={<WorkerListView />} />
+              <Route path="/workers" element={<WorkerListView currentUser={user} />} />
               <Route path="/worker/:id" element={<WorkerProfileView currentUser={user} />} />
               <Route path="/join" element={<JoinWorkerForm currentUser={user} />} />
               <Route path="/login" element={<LoginView />} />
