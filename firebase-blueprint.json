@@ -1,0 +1,86 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Information about a customer or worker",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string", "description": "Full name" },
+        "phone": { "type": "string", "description": "Phone number" },
+        "role": { "type": "string", "enum": ["customer", "worker"], "description": "User role" },
+        "location": { "type": "string", "description": "City or area" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation date" }
+      },
+      "required": ["uid", "name", "role"]
+    },
+    "Worker": {
+      "title": "Worker",
+      "description": "Detailed profile for a worker",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string", "description": "Full name" },
+        "phone": { "type": "string", "description": "Phone number" },
+        "skills": { "type": "array", "items": { "type": "string" }, "description": "List of skills" },
+        "experience": { "type": "number", "description": "Years of experience" },
+        "availability": { "type": "boolean", "description": "Online/Offline status" },
+        "rating": { "type": "number", "description": "Average rating" },
+        "reviewCount": { "type": "number", "description": "Number of reviews" },
+        "location": { "type": "string", "description": "Service area" },
+        "district": { "type": "string", "description": "District" },
+        "area": { "type": "string", "description": "Area" },
+        "idProofUrl": { "type": "string", "description": "URL to uploaded ID proof" }
+      },
+      "required": ["uid", "name", "phone", "skills", "location"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "A service request from a customer to a worker",
+      "type": "object",
+      "properties": {
+        "bookingId": { "type": "string", "description": "Unique booking ID" },
+        "customerId": { "type": "string", "description": "UID of the customer" },
+        "workerId": { "type": "string", "description": "UID of the worker" },
+        "service": { "type": "string", "description": "Type of service" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "in-progress", "completed", "cancelled"], "description": "Current status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Booking date" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update date" }
+      },
+      "required": ["customerId", "workerId", "service", "status"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "A review for a completed service",
+      "type": "object",
+      "properties": {
+        "reviewId": { "type": "string", "description": "Unique review ID" },
+        "bookingId": { "type": "string", "description": "Related booking ID" },
+        "customerId": { "type": "string", "description": "UID of the reviewer" },
+        "workerId": { "type": "string", "description": "UID of the worker being reviewed" },
+        "rating": { "type": "number", "description": "Rating out of 5" },
+        "comment": { "type": "string", "description": "Review text" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Review date" }
+      },
+      "required": ["bookingId", "customerId", "workerId", "rating"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A message in a chat between customer and worker",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string", "description": "UID of the sender" },
+        "text": { "type": "string", "description": "Message content" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Message date" }
+      },
+      "required": ["senderId", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "User", "description": "User profiles" },
+    "/workers/{workerId}": { "schema": "Worker", "description": "Worker profiles" },
+    "/bookings/{bookingId}": { "schema": "Booking", "description": "Service bookings" },
+    "/reviews/{reviewId}": { "schema": "Review", "description": "Customer reviews" },
+    "/chats/{chatId}/messages/{messageId}": { "schema": "ChatMessage", "description": "Chat messages" }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "ReparoH",
+  "description": "Connect with the best workers ",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
