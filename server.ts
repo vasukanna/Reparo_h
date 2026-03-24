@@ -26,14 +26,18 @@ async function startServer() {
 
   // Create Stripe Checkout Session
   app.post("/api/create-checkout-session", async (req, res) => {
-    const { userId, email, priceId } = req.body;
+    const { userId, email, priceId, mode = "subscription", workerId } = req.body;
 
     if (!process.env.STRIPE_SECRET_KEY) {
       return res.status(500).json({ error: "Stripe secret key not configured" });
     }
 
     try {
-      const session = await stripe.checkout.sessions.create({
+      const queryParams = new URLSearchParams();
+      queryParams.set('session_id', '{CHECKOUT_SESSION_ID}');
+      if (workerId) queryParams.set('workerId', workerId);
+
+      const sessionConfig: any = {
         payment_method_types: ["card"],
         line_items: [
           {
@@ -41,15 +45,20 @@ async function startServer() {
             quantity: 1,
           },
         ],
-        mode: "subscription",
-        success_url: `${process.env.APP_URL || "http://localhost:3000"}/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+        mode: mode,
+        success_url: `${process.env.APP_URL || "http://localhost:3000"}/subscription/success?${queryParams.toString()}`,
         cancel_url: `${process.env.APP_URL || "http://localhost:3000"}/subscription/cancel`,
         customer_email: email,
         client_reference_id: userId,
-        subscription_data: {
+      };
+
+      if (mode === "subscription") {
+        sessionConfig.subscription_data = {
           trial_period_days: 7, // 7-day free trial
-        },
-      });
+        };
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionConfig);
 
       res.json({ id: session.id, url: session.url });
     } catch (error: any) {

@@ -13,6 +13,7 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuthenticated() &&
+        ('email' in request.auth.token) &&
         (request.auth.token.email == "vasu.kannaluri@gmail.com" && request.auth.token.email_verified == true);
     }
 
@@ -25,10 +26,10 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['uid', 'name', 'email', 'phone', 'role', 'location', 'subscriptionStatus', 'subscriptionId', 'trialEndDate', 'createdAt']) &&
+      return hasOnlyAllowedFields(['uid', 'name', 'email', 'phone', 'role', 'location', 'area', 'district', 'subscriptionStatus', 'subscriptionId', 'trialEndDate', 'createdAt']) &&
         data.uid == request.auth.uid &&
         data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-        (data.email == null || isValidEmail(data.email)) &&
+        (!('email' in data) || data.email == null || isValidEmail(data.email)) &&
         data.role in ['customer', 'worker'];
     }
 
@@ -57,7 +58,7 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
+      allow read: if isAuthenticated();
       allow create, update: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data);
     }
 
@@ -72,7 +73,7 @@ service cloud.firestore {
 
     match /bookings/{bookingId} {
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.customerId || request.auth.uid == resource.data.workerId || isAdmin());
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.customerId && request.resource.data.adminApproved == false;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.customerId;
       allow update: if isAdmin() || (isAuthenticated() && (request.auth.uid == resource.data.customerId || request.auth.uid == resource.data.workerId));
     }
 

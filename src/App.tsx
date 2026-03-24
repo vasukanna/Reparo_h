@@ -116,11 +116,14 @@ interface Booking {
   id: string;
   customerId: string;
   workerId: string;
+  customerName?: string;
+  workerName?: string;
   service: string;
   status: 'pending' | 'accepted' | 'in-progress' | 'completed' | 'cancelled';
   rating?: number;
   createdAt: any;
   updatedAt: any;
+  otherPartyName?: string;
 }
 
 interface ChatMessage {
@@ -192,56 +195,6 @@ const ErrorBoundary = ({ children }: { children: ReactNode }) => {
 const LoginView = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [isLogin, setIsLogin] = useState(true);
-  const [authMode, setAuthMode] = useState<'mobile' | 'email'>('mobile');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const loginEmail = authMode === 'mobile' ? `${phone.replace(/\D/g, '')}@reparoh.app` : email;
-
-      if (isLogin) {
-        await signInWithEmailAndPassword(auth, loginEmail, password);
-        toast.success('Welcome back!');
-      } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, loginEmail, password);
-        await updateProfile(userCredential.user, { displayName: name });
-        await setDoc(doc(db, 'users', userCredential.user.uid), {
-          uid: userCredential.user.uid,
-          name: name,
-          email: authMode === 'email' ? email : '',
-          phone: phone,
-          role: 'customer',
-          subscriptionStatus: 'trialing',
-          trialEndDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000), // 45 days free trial
-          createdAt: serverTimestamp()
-        });
-        toast.success('Account created! 45-day free trial activated.');
-      }
-      navigate('/');
-    } catch (error: any) {
-      console.error("Auth error:", error);
-      if (error.code === 'auth/operation-not-allowed') {
-        toast.error("Email/Password authentication is not enabled in Firebase Console. Please enable it.");
-      } else if (error.code === 'auth/invalid-email') {
-        toast.error("Invalid mobile number or email format.");
-      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        toast.error("Invalid credentials. Please check your details.");
-      } else if (error.code === 'auth/email-already-in-use') {
-        toast.error("An account already exists with this mobile number or email.");
-      } else {
-        toast.error(error.message);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleGoogleLogin = async () => {
     const provider = new GoogleAuthProvider();
@@ -254,17 +207,16 @@ const LoginView = () => {
           name: result.user.displayName,
           email: result.user.email,
           role: 'customer',
-          subscriptionStatus: 'trialing',
-          trialEndDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000), // 45 days free trial
           createdAt: serverTimestamp()
         });
-        toast.success('Account created! 45-day free trial activated.');
+        toast.success('Account created successfully!');
+      } else {
+        toast.success('Welcome back!');
       }
       navigate('/');
     } catch (error: any) {
       console.error("Google login error:", error);
       if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
-        // User intentionally closed the popup, no need to show an error toast
         return;
       }
       if (error.code === 'auth/operation-not-allowed') {
@@ -277,127 +229,30 @@ const LoginView = () => {
 
   return (
     <div className="pt-24 pb-24 px-4 max-w-lg mx-auto">
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-        <h1 className="text-2xl font-bold mb-2">{isLogin ? t('login') : t('signup')}</h1>
-        <p className="text-gray-500 mb-8 text-sm">
-          {isLogin ? 'Welcome back to ReparoH' : 'Join our community of workers and customers'}
+      <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 text-center">
+        <div className="w-20 h-20 bg-orange-100 rounded-[2rem] flex items-center justify-center mx-auto mb-6">
+          <img 
+            src="/logo.png" 
+            alt="ReparoH Logo" 
+            className="w-12 h-12 object-contain"
+            referrerPolicy="no-referrer"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = 'https://picsum.photos/seed/reparoh/100/100';
+            }}
+          />
+        </div>
+        <h1 className="text-2xl font-bold mb-2">{t('login')} / {t('signup')}</h1>
+        <p className="text-gray-500 mb-10 text-sm">
+          Join our community of workers and customers
         </p>
-
-        <div className="flex gap-2 mb-6 p-1 bg-gray-100 rounded-2xl">
-          <button 
-            type="button"
-            onClick={() => setAuthMode('mobile')}
-            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${authMode === 'mobile' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500'}`}
-          >
-            Mobile
-          </button>
-          <button 
-            type="button"
-            onClick={() => setAuthMode('email')}
-            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${authMode === 'email' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500'}`}
-          >
-            Email
-          </button>
-        </div>
-
-        <form onSubmit={handleAuth} className="space-y-4">
-          {!isLogin && (
-            <div className="relative">
-              <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-              <input 
-                required
-                type="text" 
-                placeholder={t('full_name')}
-                className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-                value={name}
-                onChange={e => setName(e.target.value)}
-              />
-            </div>
-          )}
-          
-          {authMode === 'mobile' ? (
-            <div className="relative">
-              <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-              <input 
-                required
-                type="tel" 
-                placeholder={t('mobile_number')}
-                className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
-              />
-            </div>
-          ) : (
-            <>
-              {!isLogin && (
-                <div className="relative">
-                  <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                  <input 
-                    required
-                    type="tel" 
-                    placeholder={t('mobile_number')}
-                    className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-                    value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                  />
-                </div>
-              )}
-              <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                <input 
-                  required
-                  type="email" 
-                  placeholder={t('email')}
-                  className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                />
-              </div>
-            </>
-          )}
-
-          <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-            <input 
-              required
-              type="password" 
-              placeholder={t('password')}
-              className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-            />
-          </div>
-          <button 
-            type="submit"
-            disabled={loading}
-            className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-colors disabled:opacity-50"
-          >
-            {loading ? '...' : (isLogin ? t('login') : t('signup'))}
-          </button>
-        </form>
-
-        <div className="flex items-center gap-4 my-8">
-          <div className="flex-1 h-px bg-gray-100"></div>
-          <span className="text-xs text-gray-400 font-medium">{t('or')}</span>
-          <div className="flex-1 h-px bg-gray-100"></div>
-        </div>
 
         <button 
           onClick={handleGoogleLogin}
-          className="w-full py-4 bg-white border border-gray-200 text-gray-700 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-gray-50 transition-colors"
+          className="w-full py-4 bg-white border border-gray-200 text-gray-700 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-gray-50 transition-colors shadow-sm"
         >
           <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
           {t('login_google')}
         </button>
-
-        <div className="mt-8 text-center">
-          <button 
-            onClick={() => setIsLogin(!isLogin)}
-            className="text-sm font-medium text-orange-600 hover:underline"
-          >
-            {isLogin ? "Don't have an account? Sign Up" : "Already have an account? Login"}
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -451,7 +306,10 @@ const Navbar = ({ user, profile }: { user: FirebaseUser | null, profile: UserPro
               <User size={20} className="text-gray-600" />
             </Link>
             <button 
-              onClick={() => signOut(auth)}
+              onClick={async () => {
+                await signOut(auth);
+                navigate('/');
+              }}
               className="p-2 hover:bg-gray-100 rounded-full transition-colors"
             >
               <LogOut size={20} className="text-gray-600" />
@@ -471,17 +329,16 @@ const Navbar = ({ user, profile }: { user: FirebaseUser | null, profile: UserPro
 };
 
 const CategoryCard = ({ icon: Icon, label, color, onClick }: { icon: any, label: string, color: string, onClick: () => void | Promise<void>, key?: string }) => (
-  <motion.button
-    whileHover={{ scale: 1.05 }}
-    whileTap={{ scale: 0.95 }}
+  <button
+    type="button"
     onClick={onClick}
-    className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 gap-2"
+    className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 gap-2 hover:scale-105 active:scale-95 transition-transform"
   >
     <div className={`p-3 rounded-xl ${color}`}>
       <Icon size={24} className="text-white" />
     </div>
     <span className="text-xs font-medium text-gray-700 text-center">{label}</span>
-  </motion.button>
+  </button>
 );
 
 const HomeView = () => {
@@ -625,11 +482,23 @@ const HomeView = () => {
 const WorkerListView = ({ currentUser }: { currentUser: FirebaseUser | null }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const category = searchParams.get('category');
   const search = searchParams.get('search');
   const initialDistrict = searchParams.get('district') || 'nellore';
   const initialArea = searchParams.get('area') || 'all';
+
+  const categories = [
+    { id: 'construction', label: t('construction') },
+    { id: 'painting', label: t('painting') },
+    { id: 'electrical', label: t('electrical') },
+    { id: 'plumbing', label: t('plumbing') },
+    { id: 'woodwork', label: t('woodwork') },
+    { id: 'tiles', label: t('tiles_granite') },
+    { id: 'borewell', label: t('borewell') },
+    { id: 'interiors', label: t('interiors') },
+    { id: 'cleaning', label: t('cleaning') },
+  ];
   
   const [workers, setWorkers] = useState<(WorkerProfile & { userLocation: string })[]>([]);
   const [loading, setLoading] = useState(true);
@@ -670,19 +539,18 @@ const WorkerListView = ({ currentUser }: { currentUser: FirebaseUser | null }) =
     };
     fetchProfile();
 
-    let q = query(collection(db, 'workers'), where('availability', '==', true));
-    if (category) {
-      q = query(q, where('skills', 'array-contains', category));
-    }
+    let q = query(collection(db, 'workers'));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const workerData = snapshot.docs.map((workerDoc) => {
-        const data = workerDoc.data() as WorkerProfile;
-        return {
-          ...data,
-          userLocation: data.location,
-        };
-      });
+      const workerData = snapshot.docs
+        .map((workerDoc) => {
+          const data = workerDoc.data() as WorkerProfile;
+          return {
+            ...data,
+            userLocation: data.location,
+          };
+        })
+        .filter(w => w.availability === true);
       setWorkers(workerData);
       setLoading(false);
     }, (error) => {
@@ -690,10 +558,11 @@ const WorkerListView = ({ currentUser }: { currentUser: FirebaseUser | null }) =
     });
 
     return () => unsubscribe();
-  }, [category, currentUser]);
+  }, [currentUser]);
 
   const filteredWorkers = useMemo(() => {
     return workers.filter(w => {
+      const categoryMatch = !category || (Array.isArray(w.skills) && w.skills.some(s => typeof s === 'string' && s.toLowerCase() === category.toLowerCase()));
       const districtMatch = selectedDistrict === 'all' || w.district === selectedDistrict;
       const areaMatch = selectedArea === 'all' || w.area === selectedArea;
       
@@ -701,12 +570,12 @@ const WorkerListView = ({ currentUser }: { currentUser: FirebaseUser | null }) =
       if (search) {
         const term = search.toLowerCase();
         searchMatch = w.name.toLowerCase().includes(term) || 
-                      w.skills.some(s => s.toLowerCase().includes(term));
+                      (Array.isArray(w.skills) && w.skills.some(s => typeof s === 'string' && s.toLowerCase().includes(term)));
       }
       
-      return districtMatch && areaMatch && searchMatch;
+      return categoryMatch && districtMatch && areaMatch && searchMatch;
     });
-  }, [workers, selectedDistrict, selectedArea, search]);
+  }, [workers, category, selectedDistrict, selectedArea, search]);
 
   const handleWorkerClick = (workerUid: string) => {
     if (profile?.role === 'worker' && currentUser?.uid !== workerUid) {
@@ -766,6 +635,40 @@ const WorkerListView = ({ currentUser }: { currentUser: FirebaseUser | null }) =
         </div>
       </div>
 
+      <div className="flex gap-2 overflow-x-auto pb-2 mb-6 hide-scrollbar">
+        <button
+          onClick={() => {
+            const params = new URLSearchParams(searchParams);
+            params.delete('category');
+            setSearchParams(params);
+          }}
+          className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-bold transition-all ${
+            !category 
+              ? 'bg-orange-600 text-white shadow-md' 
+              : 'bg-white text-gray-600 border border-gray-200'
+          }`}
+        >
+          {t('all')}
+        </button>
+        {categories.map(cat => (
+          <button
+            key={cat.id}
+            onClick={() => {
+              const params = new URLSearchParams(searchParams);
+              params.set('category', cat.id);
+              setSearchParams(params);
+            }}
+            className={`px-4 py-2 rounded-full whitespace-nowrap text-sm font-bold transition-all ${
+              category === cat.id 
+                ? 'bg-orange-600 text-white shadow-md' 
+                : 'bg-white text-gray-600 border border-gray-200'
+            }`}
+          >
+            {cat.label}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <div className="flex justify-center py-12">
           <div className="w-8 h-8 border-4 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
@@ -822,8 +725,9 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
   const navigate = useNavigate();
   const [worker, setWorker] = useState<WorkerProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [hasApprovedBooking, setHasApprovedBooking] = useState(false);
+  const [hasBooking, setHasBooking] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -848,15 +752,17 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
             }
           }
 
-          // Check for approved booking
+          // Check for any booking
           const q = query(
             collection(db, 'bookings'), 
-            where('customerId', '==', currentUser.uid),
-            where('workerId', '==', id),
-            where('adminApproved', '==', true)
+            where('customerId', '==', currentUser.uid)
           );
           const bookingSnap = await getDocs(q);
-          setHasApprovedBooking(!bookingSnap.empty);
+          const hasExistingBooking = bookingSnap.docs.some(d => {
+            const data = d.data();
+            return data.workerId === id;
+          });
+          setHasBooking(hasExistingBooking);
         }
 
         setLoading(false);
@@ -875,35 +781,17 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
     }
     if (!worker) return;
 
-    if (profile?.subscriptionStatus !== 'active' && profile?.subscriptionStatus !== 'trialing') {
-      toast.error('Please subscribe to book workers');
-      navigate('/subscription');
+    if (profile?.role === 'worker') {
+      toast.error('Workers cannot book services');
       return;
     }
 
-    try {
-      const bookingData = {
-        customerId: currentUser.uid,
-        workerId: worker.uid,
-        service: worker.skills[0],
-        status: 'pending',
-        adminApproved: false,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      };
-      await addDoc(collection(db, 'bookings'), bookingData);
-      toast.success('Booking request sent!');
-      navigate('/bookings');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'bookings');
-    }
+    // Customers pay per booking
+    navigate(`/subscription?workerId=${worker.uid}`);
   };
 
   const handleDeleteWorker = async () => {
     if (!id) return;
-    const confirmed = confirm('Are you sure you want to delete this worker profile?');
-    if (!confirmed) return;
-    
     try {
       await deleteDoc(doc(db, 'workers', id));
       toast.success('Worker profile deleted');
@@ -916,8 +804,32 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
   if (loading) return <div className="pt-20 text-center">Loading...</div>;
   if (!worker) return <div className="pt-20 text-center">Worker not found</div>;
 
+  const canViewDetails = hasBooking || currentUser?.uid === worker.uid || currentUser?.email === 'vasu.kannaluri@gmail.com';
+
   return (
     <div className="pt-20 pb-24 px-4 max-w-lg mx-auto">
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full">
+            <h3 className="text-xl font-bold mb-2">Delete Worker Profile?</h3>
+            <p className="text-gray-500 mb-6">Are you sure you want to delete this worker profile? This action cannot be undone.</p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleDeleteWorker}
+                className="flex-1 py-3 bg-red-600 text-white rounded-xl font-bold"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <button onClick={() => navigate(-1)} className="mb-6 p-2 hover:bg-gray-100 rounded-full">
         <ArrowLeft size={24} />
       </button>
@@ -967,31 +879,37 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
             <div>
               <div className="text-xs text-gray-500">{t('mobile_number')}</div>
               <div className="font-bold text-gray-900">
-                {currentUser ? worker.phone : '••••••••••'}
+                {canViewDetails ? worker.phone : '••••••••••'}
               </div>
             </div>
           </div>
-          {currentUser && (
+          {canViewDetails ? (
             <a 
               href={`tel:${worker.phone}`}
               className="p-3 bg-white text-orange-600 rounded-xl shadow-sm border border-gray-100 hover:bg-orange-50 transition-colors"
             >
               <Phone size={20} />
             </a>
+          ) : (
+            <button 
+              onClick={handleBooking}
+              className="text-xs font-bold text-orange-600 bg-orange-100 px-3 py-2 rounded-lg hover:bg-orange-200 transition-colors"
+            >
+              Book to View
+            </button>
           )}
         </div>
 
         <div className="flex gap-3">
           <button 
             onClick={() => {
-              if (currentUser) {
+              if (canViewDetails) {
                 navigate(`/chat/${worker.uid}`);
               } else {
-                toast.error('Please login to chat with workers');
-                navigate('/login');
+                toast.error('Please book the worker first to enable chat');
               }
             }}
-            className="flex-1 flex items-center justify-center gap-2 py-4 bg-gray-100 text-gray-900 rounded-2xl font-bold hover:bg-gray-200 transition-colors"
+            className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-bold transition-colors ${canViewDetails ? 'bg-gray-100 text-gray-900 hover:bg-gray-200' : 'bg-gray-50 text-gray-400 cursor-not-allowed'}`}
           >
             <MessageSquare size={20} />
             {t('chat')}
@@ -1007,7 +925,7 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
 
         {currentUser?.email === 'vasu.kannaluri@gmail.com' && (
           <button 
-            onClick={handleDeleteWorker}
+            onClick={() => setShowDeleteConfirm(true)}
             className="w-full mt-4 flex items-center justify-center gap-2 py-3 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-colors"
           >
             <Trash2 size={20} />
@@ -1064,7 +982,7 @@ const JoinWorkerForm = ({ currentUser }: { currentUser: FirebaseUser | null }) =
         uid: currentUser.uid,
         name: formData.fullName,
         phone: formData.phone,
-        skills: formData.skills.split(',').map(s => s.trim()),
+        skills: formData.skills.split(',').map(s => s.trim().toLowerCase()),
         experience: Number(formData.experience),
         location: formData.location,
         district: formData.district,
@@ -1289,18 +1207,6 @@ const BookingsView = ({ currentUser }: { currentUser: FirebaseUser | null }) => 
     }
   };
 
-  const approveBooking = async (id: string) => {
-    try {
-      await updateDoc(doc(db, 'bookings', id), { 
-        adminApproved: true,
-        updatedAt: serverTimestamp()
-      });
-      toast.success('Booking approved by Admin');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookings/${id}`);
-    }
-  };
-
   return (
     <div className="pt-20 pb-24 px-4 max-w-lg mx-auto">
       <h1 className="text-2xl font-bold mb-6">{t('my_bookings')}</h1>
@@ -1323,25 +1229,18 @@ const BookingsView = ({ currentUser }: { currentUser: FirebaseUser | null }) => 
                   {t(booking.status)}
                 </span>
               </div>
-
-              <div className="mb-4">
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  booking.adminApproved ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
-                }`}>
-                  {booking.adminApproved ? 'Admin Approved' : 'Pending Admin Approval'}
-                </span>
-              </div>
               
-              {currentUser?.email === 'vasu.kannaluri@gmail.com' && !booking.adminApproved && (
-                <button 
-                  onClick={() => approveBooking(booking.id)}
-                  className="w-full mb-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold shadow-md"
+              <div className="flex gap-2 mt-4">
+                <Link 
+                  to={`/chat/${currentUser?.uid === booking.workerId ? booking.customerId : booking.workerId}`}
+                  className="flex-1 py-2 bg-orange-100 text-orange-600 rounded-xl text-sm font-bold text-center flex items-center justify-center gap-2"
                 >
-                  Approve as Admin
-                </button>
-              )}
+                  <MessageSquare size={16} />
+                  Chat
+                </Link>
+              </div>
 
-              {currentUser?.uid === booking.workerId && booking.status === 'pending' && booking.adminApproved && (
+              {currentUser?.uid === booking.workerId && booking.status === 'pending' && (
                 <div className="flex gap-2 mt-4">
                   <button 
                     onClick={() => updateStatus(booking.id, 'accepted')}
@@ -1358,7 +1257,7 @@ const BookingsView = ({ currentUser }: { currentUser: FirebaseUser | null }) => 
                 </div>
               )}
 
-              {booking.status === 'accepted' && booking.adminApproved && (
+              {booking.status === 'accepted' && (
                 <button 
                   onClick={() => updateStatus(booking.id, 'in-progress')}
                   className="w-full mt-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold"
@@ -1367,7 +1266,7 @@ const BookingsView = ({ currentUser }: { currentUser: FirebaseUser | null }) => 
                 </button>
               )}
 
-              {booking.status === 'in-progress' && booking.adminApproved && (
+              {booking.status === 'in-progress' && (
                 <button 
                   onClick={() => updateStatus(booking.id, 'completed')}
                   className="w-full mt-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold"
@@ -1503,6 +1402,16 @@ const BookingHistoryView = ({ currentUser }: { currentUser: FirebaseUser | null 
                   }`}>
                     {t(booking.status)}
                   </span>
+                </div>
+
+                <div className="flex gap-2 mt-4 mb-4">
+                  <Link 
+                    to={`/chat/${currentUser?.uid === booking.workerId ? booking.customerId : booking.workerId}`}
+                    className="flex-1 py-2 bg-orange-100 text-orange-600 rounded-xl text-sm font-bold text-center flex items-center justify-center gap-2"
+                  >
+                    <MessageSquare size={16} />
+                    Chat
+                  </Link>
                 </div>
 
                 {booking.status === 'completed' && currentUser?.uid === booking.customerId && !booking.rating && (
@@ -1754,7 +1663,10 @@ const ProfileView = ({ user, profile }: { user: FirebaseUser | null, profile: Us
         )}
 
         <button 
-          onClick={() => signOut(auth)}
+          onClick={async () => {
+            await signOut(auth);
+            navigate('/');
+          }}
           className="w-full py-4 bg-gray-50 text-gray-600 rounded-2xl font-bold hover:bg-gray-100 transition-colors flex items-center justify-center gap-2"
         >
           <LogOut size={20} />
@@ -1769,6 +1681,11 @@ const SubscriptionView = ({ currentUser, profile }: { currentUser: FirebaseUser 
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const workerId = searchParams.get('workerId');
+
+  const isWorker = profile?.role === 'worker';
+  const price = isWorker ? '₹149' : '₹9';
 
   const handleSubscribe = async () => {
     if (!currentUser) {
@@ -1787,6 +1704,8 @@ const SubscriptionView = ({ currentUser, profile }: { currentUser: FirebaseUser 
         body: JSON.stringify({
           userId: currentUser.uid,
           email: currentUser.email,
+          mode: isWorker ? 'subscription' : 'payment',
+          workerId: workerId
         }),
       });
 
@@ -1810,17 +1729,19 @@ const SubscriptionView = ({ currentUser, profile }: { currentUser: FirebaseUser 
         <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
           <Zap className="text-orange-600" size={32} />
         </div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Premium Subscription</h1>
-        <p className="text-gray-500 mb-8">Get unlimited access to all workers and priority support.</p>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">
+          {isWorker ? 'Premium Subscription' : 'Booking Pass'}
+        </h1>
+        <p className="text-gray-500 mb-8">
+          {isWorker ? 'Get unlimited access to all workers and priority support.' : 'Pay securely to confirm your booking and get priority service.'}
+        </p>
         
         <div className="bg-gray-50 rounded-2xl p-6 mb-8 text-left">
           <div className="flex items-center gap-3 mb-4">
             <CheckCircle2 className="text-green-500" size={20} />
-            <span className="text-sm font-medium text-gray-700">7-Day Free Trial</span>
-          </div>
-          <div className="flex items-center gap-3 mb-4">
-            <CheckCircle2 className="text-green-500" size={20} />
-            <span className="text-sm font-medium text-gray-700">Unlimited Service Bookings</span>
+            <span className="text-sm font-medium text-gray-700">
+              {isWorker ? 'Unlimited Service Bookings' : '1 Confirmed Booking'}
+            </span>
           </div>
           <div className="flex items-center gap-3 mb-4">
             <CheckCircle2 className="text-green-500" size={20} />
@@ -1833,8 +1754,8 @@ const SubscriptionView = ({ currentUser, profile }: { currentUser: FirebaseUser 
         </div>
 
         <div className="mb-8">
-          <span className="text-4xl font-bold text-gray-900">₹99</span>
-          <span className="text-gray-500">/month</span>
+          <span className="text-4xl font-bold text-gray-900">{price}</span>
+          <span className="text-gray-500">{isWorker ? '/month' : '/booking'}</span>
         </div>
 
         <button
@@ -1842,9 +1763,11 @@ const SubscriptionView = ({ currentUser, profile }: { currentUser: FirebaseUser 
           disabled={loading}
           className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-all disabled:opacity-50"
         >
-          {loading ? 'Processing...' : 'Start 7-Day Free Trial'}
+          {loading ? 'Processing...' : (isWorker ? 'Subscribe Now' : 'Pay ₹9 per Booking')}
         </button>
-        <p className="text-xs text-gray-400 mt-4">Cancel anytime. No commitment.</p>
+        <p className="text-xs text-gray-400 mt-4">
+          {isWorker ? 'Cancel anytime. No commitment.' : 'Secure payment via Stripe.'}
+        </p>
       </div>
     </div>
   );
@@ -1853,27 +1776,50 @@ const SubscriptionView = ({ currentUser, profile }: { currentUser: FirebaseUser 
 const SuccessView = ({ currentUser }: { currentUser: FirebaseUser | null }) => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get('session_id');
+  const workerId = searchParams.get('workerId');
   const navigate = useNavigate();
 
   useEffect(() => {
     if (currentUser && sessionId) {
-      // In a real app, you'd verify the session on the backend
-      // and update the user's subscription status in Firestore.
-      // For this demo, we'll update it directly.
-      const updateSubscription = async () => {
+      const processSuccess = async () => {
         try {
-          await updateDoc(doc(db, 'users', currentUser.uid), {
-            subscriptionStatus: 'active',
-            trialEndDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
-          });
-          toast.success('Subscription activated!');
+          if (workerId) {
+            // It's a per-booking payment
+            const workerDoc = await getDoc(doc(db, 'workers', workerId));
+            if (workerDoc.exists()) {
+              const worker = workerDoc.data();
+              const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+              const profile = userDoc.data();
+              
+              const bookingData = {
+                customerId: currentUser.uid,
+                workerId: worker.uid,
+                customerName: profile?.name || currentUser.displayName || 'Customer',
+                workerName: worker.name,
+                service: worker.skills[0],
+                status: 'pending',
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+              };
+              await addDoc(collection(db, 'bookings'), bookingData);
+              toast.success('Booking confirmed and paid!');
+              navigate('/bookings');
+            }
+          } else {
+            // It's a worker subscription
+            await updateDoc(doc(db, 'users', currentUser.uid), {
+              subscriptionStatus: 'active',
+              trialEndDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
+            });
+            toast.success('Subscription activated!');
+          }
         } catch (error) {
-          console.error('Error updating subscription:', error);
+          console.error('Error processing success:', error);
         }
       };
-      updateSubscription();
+      processSuccess();
     }
-  }, [currentUser, sessionId]);
+  }, [currentUser, sessionId, workerId, navigate]);
 
   return (
     <div className="pt-24 pb-32 px-6 max-w-lg mx-auto text-center">
@@ -1882,7 +1828,9 @@ const SuccessView = ({ currentUser }: { currentUser: FirebaseUser | null }) => {
           <CheckCircle2 className="text-green-600" size={32} />
         </div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h1>
-        <p className="text-gray-500 mb-8">Your premium subscription is now active. Enjoy all the benefits!</p>
+        <p className="text-gray-500 mb-8">
+          {workerId ? 'Your booking has been confirmed. You can now chat with the worker.' : 'Your premium subscription is now active. Enjoy all the benefits!'}
+        </p>
         <button
           onClick={() => navigate('/')}
           className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-all"
@@ -1935,11 +1883,16 @@ export default function App() {
               role: 'customer',
               location: 'Nellore, AP',
               area: 'nellore_city',
-              subscriptionStatus: 'none',
+              subscriptionStatus: 'trialing',
+              trialEndDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000), // 45 days free trial
               createdAt: serverTimestamp()
             };
-            await setDoc(doc(db, 'users', u.uid), newProfile);
-            setProfile(newProfile);
+            try {
+              await setDoc(doc(db, 'users', u.uid), newProfile);
+              setProfile(newProfile);
+            } catch (error) {
+              handleFirestoreError(error, OperationType.CREATE, `users/${u.uid}`);
+            }
           } else {
             setProfile(userDoc.data() as UserProfile);
           }
