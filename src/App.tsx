@@ -1,3 +1,5 @@
+import logo from './assests/Logo.png';
+
 import React, { useState, useEffect, useMemo, ReactNode, useRef } from 'react';
 import { 
   BrowserRouter as Router, 
@@ -144,7 +146,7 @@ const AP_DISTRICTS = [
 const NELLORE_AREAS = [
   'vedayapalem', 'magunta_layout', 'dargamitta', 'nellore_city', 'kovur', 
   'ramji_nagar', 'balaji_nagar', 'stonehouse_pet', 'santhapet', 'atmakur', 
-  'gudur', 'kavali', 'naidupeta', 'sullurpeta', 'venkatagiri'
+  'gudur', 'kavali', 'naidupeta', 'sullurpeta', 'venkatagiri', 'Buchi', 'sangam', 'chennavarappadu'
 ];
 
 // --- Components ---
@@ -232,7 +234,7 @@ const LoginView = () => {
       <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 text-center">
         <div className="w-20 h-20 bg-orange-100 rounded-[2rem] flex items-center justify-center mx-auto mb-6">
           <img 
-            src="/logo.png" 
+            src={logo} 
             alt="ReparoH Logo" 
             className="w-12 h-12 object-contain"
             referrerPolicy="no-referrer"
