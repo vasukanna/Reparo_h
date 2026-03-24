@@ -16,6 +16,22 @@ service cloud.firestore {
         (request.auth.token.email == "vasu.kannaluri@gmail.com" && request.auth.token.email_verified == true);
     }
 
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'name', 'email', 'phone', 'role', 'location', 'subscriptionStatus', 'subscriptionId', 'trialEndDate', 'createdAt']) &&
+        data.uid == request.auth.uid &&
+        data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+        (data.email == null || isValidEmail(data.email)) &&
+        data.role in ['customer', 'worker'];
+    }
+
     function isChatParticipant(chatId) {
       return isAuthenticated() && request.auth.uid in chatId.split('_');
     }
@@ -31,27 +47,40 @@ service cloud.firestore {
         data.location is string;
     }
 
+    function isWorker() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'worker';
+    }
+
+    function isSubscriptionActive() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return user.subscriptionStatus in ['active', 'trialing'];
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create, update: if isOwner(userId) || isAdmin();
+      allow create, update: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data);
     }
 
     match /workers/{workerId} {
+      // Allow public read so unauthenticated users can see the worker list and details
       allow read: if true;
-      allow create, update: if isOwner(workerId) && isValidWorker(request.resource.data);
+      allow create: if isOwner(workerId) && isValidWorker(request.resource.data);
+      allow update: if (isOwner(workerId) && isValidWorker(request.resource.data)) || 
+                     (isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rating', 'reviewCount']));
       allow delete: if isAdmin();
     }
 
     match /bookings/{bookingId} {
-      allow read: if isAuthenticated() && (request.auth.uid == resource.data.customerId || request.auth.uid == resource.data.workerId);
-      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.customerId;
-      allow update: if isAuthenticated() && (request.auth.uid == resource.data.customerId || request.auth.uid == resource.data.workerId);
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.customerId || request.auth.uid == resource.data.workerId || isAdmin());
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.customerId && request.resource.data.adminApproved == false;
+      allow update: if isAdmin() || (isAuthenticated() && (request.auth.uid == resource.data.customerId || request.auth.uid == resource.data.workerId));
     }
 
     match /chats/{chatId} {
-      allow read: if isChatParticipant(chatId);
+      // Allow chat if user is participant and booking is approved (implied by business logic)
+      allow read: if isChatParticipant(chatId) || isAdmin();
       match /messages/{messageId} {
-        allow read: if isChatParticipant(chatId);
+        allow read: if isChatParticipant(chatId) || isAdmin();
         allow create: if isChatParticipant(chatId);
       }
     }

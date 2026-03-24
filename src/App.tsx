@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, ReactNode } from 'react';
+import React, { useState, useEffect, useMemo, ReactNode, useRef } from 'react';
 import { 
   BrowserRouter as Router, 
   Routes, 
@@ -32,6 +32,7 @@ import {
   collection, 
   doc, 
   getDoc, 
+  getDocs,
   setDoc, 
   query, 
   where, 
@@ -86,6 +87,9 @@ interface UserProfile {
   location?: string;
   area?: string;
   district?: string;
+  subscriptionStatus?: 'none' | 'trialing' | 'active' | 'canceled' | 'past_due';
+  subscriptionId?: string;
+  trialEndDate?: any;
   createdAt: any;
 }
 
@@ -114,6 +118,7 @@ interface Booking {
   workerId: string;
   service: string;
   status: 'pending' | 'accepted' | 'in-progress' | 'completed' | 'cancelled';
+  rating?: number;
   createdAt: any;
   updatedAt: any;
 }
@@ -188,91 +193,51 @@ const LoginView = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [isLogin, setIsLogin] = useState(true);
-  const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+  const [authMode, setAuthMode] = useState<'mobile' | 'email'>('mobile');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [otp, setOtp] = useState('');
-  const [verificationId, setVerificationId] = useState<ConfirmationResult | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const setupRecaptcha = () => {
-    if (!(window as any).recaptchaVerifier) {
-      (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-        size: 'invisible',
-      });
-    }
-  };
-
-  const handlePhoneSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      setupRecaptcha();
-      const appVerifier = (window as any).recaptchaVerifier;
-      const confirmation = await signInWithPhoneNumber(auth, phone.startsWith('+') ? phone : `+91${phone}`, appVerifier);
-      setVerificationId(confirmation);
-      toast.success('OTP sent to your mobile!');
-    } catch (error: any) {
-      toast.error(error.message);
-      if ((window as any).recaptchaVerifier) {
-        (window as any).recaptchaVerifier.clear();
-        (window as any).recaptchaVerifier = null;
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      if (!verificationId) return;
-      const result = await verificationId.confirm(otp);
-      const userDoc = await getDoc(doc(db, 'users', result.user.uid));
-      if (!userDoc.exists()) {
-        await setDoc(doc(db, 'users', result.user.uid), {
-          uid: result.user.uid,
-          name: name || result.user.displayName || 'User',
-          phone: phone,
-          role: 'customer',
-          createdAt: serverTimestamp()
-        });
-      }
-      toast.success('Login successful!');
-      navigate('/');
-    } catch (error: any) {
-      toast.error('Invalid OTP');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
+      const loginEmail = authMode === 'mobile' ? `${phone.replace(/\D/g, '')}@reparoh.app` : email;
+
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        await signInWithEmailAndPassword(auth, loginEmail, password);
         toast.success('Welcome back!');
       } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, loginEmail, password);
         await updateProfile(userCredential.user, { displayName: name });
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           uid: userCredential.user.uid,
           name: name,
-          email: email,
+          email: authMode === 'email' ? email : '',
           phone: phone,
           role: 'customer',
+          subscriptionStatus: 'trialing',
+          trialEndDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000), // 45 days free trial
           createdAt: serverTimestamp()
         });
-        toast.success('Account created!');
+        toast.success('Account created! 45-day free trial activated.');
       }
       navigate('/');
     } catch (error: any) {
-      toast.error(error.message);
+      console.error("Auth error:", error);
+      if (error.code === 'auth/operation-not-allowed') {
+        toast.error("Email/Password authentication is not enabled in Firebase Console. Please enable it.");
+      } else if (error.code === 'auth/invalid-email') {
+        toast.error("Invalid mobile number or email format.");
+      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        toast.error("Invalid credentials. Please check your details.");
+      } else if (error.code === 'auth/email-already-in-use') {
+        toast.error("An account already exists with this mobile number or email.");
+      } else {
+        toast.error(error.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -289,18 +254,29 @@ const LoginView = () => {
           name: result.user.displayName,
           email: result.user.email,
           role: 'customer',
+          subscriptionStatus: 'trialing',
+          trialEndDate: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000), // 45 days free trial
           createdAt: serverTimestamp()
         });
+        toast.success('Account created! 45-day free trial activated.');
       }
       navigate('/');
     } catch (error: any) {
-      toast.error(error.message);
+      console.error("Google login error:", error);
+      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+        // User intentionally closed the popup, no need to show an error toast
+        return;
+      }
+      if (error.code === 'auth/operation-not-allowed') {
+        toast.error("Google authentication is not enabled in Firebase Console. Please enable it.");
+      } else {
+        toast.error(error.message);
+      }
     }
   };
 
   return (
     <div className="pt-24 pb-24 px-4 max-w-lg mx-auto">
-      <div id="recaptcha-container"></div>
       <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
         <h1 className="text-2xl font-bold mb-2">{isLogin ? t('login') : t('signup')}</h1>
         <p className="text-gray-500 mb-8 text-sm">
@@ -309,34 +285,51 @@ const LoginView = () => {
 
         <div className="flex gap-2 mb-6 p-1 bg-gray-100 rounded-2xl">
           <button 
-            onClick={() => { setAuthMethod('email'); setVerificationId(null); }}
-            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${authMethod === 'email' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500'}`}
-          >
-            Email
-          </button>
-          <button 
-            onClick={() => { setAuthMethod('phone'); setVerificationId(null); }}
-            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${authMethod === 'phone' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500'}`}
+            type="button"
+            onClick={() => setAuthMode('mobile')}
+            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${authMode === 'mobile' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500'}`}
           >
             Mobile
           </button>
+          <button 
+            type="button"
+            onClick={() => setAuthMode('email')}
+            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${authMode === 'email' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500'}`}
+          >
+            Email
+          </button>
         </div>
 
-        {authMethod === 'email' ? (
-          <form onSubmit={handleAuth} className="space-y-4">
-            {!isLogin && (
-              <>
-                <div className="relative">
-                  <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                  <input 
-                    required
-                    type="text" 
-                    placeholder={t('full_name')}
-                    className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                  />
-                </div>
+        <form onSubmit={handleAuth} className="space-y-4">
+          {!isLogin && (
+            <div className="relative">
+              <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+              <input 
+                required
+                type="text" 
+                placeholder={t('full_name')}
+                className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
+                value={name}
+                onChange={e => setName(e.target.value)}
+              />
+            </div>
+          )}
+          
+          {authMode === 'mobile' ? (
+            <div className="relative">
+              <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+              <input 
+                required
+                type="tel" 
+                placeholder={t('mobile_number')}
+                className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+              />
+            </div>
+          ) : (
+            <>
+              {!isLogin && (
                 <div className="relative">
                   <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                   <input 
@@ -348,105 +341,40 @@ const LoginView = () => {
                     onChange={e => setPhone(e.target.value)}
                   />
                 </div>
-              </>
-            )}
-            <div className="relative">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-              <input 
-                required
-                type="email" 
-                placeholder={t('email')}
-                className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
-            <div className="relative">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-              <input 
-                required
-                type="password" 
-                placeholder={t('password')}
-                className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
-            </div>
-            <button 
-              type="submit"
-              disabled={loading}
-              className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-colors disabled:opacity-50"
-            >
-              {loading ? '...' : (isLogin ? t('login') : t('signup'))}
-            </button>
-          </form>
-        ) : (
-          <div className="space-y-4">
-            {!verificationId ? (
-              <form onSubmit={handlePhoneSignIn} className="space-y-4">
-                {!isLogin && (
-                  <div className="relative">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                    <input 
-                      required
-                      type="text" 
-                      placeholder={t('full_name')}
-                      className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-                      value={name}
-                      onChange={e => setName(e.target.value)}
-                    />
-                  </div>
-                )}
-                <div className="relative">
-                  <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                  <input 
-                    required
-                    type="tel" 
-                    placeholder="Mobile Number (with +91)"
-                    className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-                    value={phone}
-                    onChange={e => setPhone(e.target.value)}
-                  />
-                </div>
-                <button 
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-colors disabled:opacity-50"
-                >
-                  {loading ? '...' : 'Send OTP'}
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleVerifyOtp} className="space-y-4">
-                <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                  <input 
-                    required
-                    type="text" 
-                    placeholder="Enter 6-digit OTP"
-                    className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
-                    value={otp}
-                    onChange={e => setOtp(e.target.value)}
-                  />
-                </div>
-                <button 
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-colors disabled:opacity-50"
-                >
-                  {loading ? '...' : 'Verify OTP'}
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => setVerificationId(null)}
-                  className="w-full text-sm text-gray-500 font-medium"
-                >
-                  Change Number
-                </button>
-              </form>
-            )}
+              )}
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                <input 
+                  required
+                  type="email" 
+                  placeholder={t('email')}
+                  className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+
+          <div className="relative">
+            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input 
+              required
+              type="password" 
+              placeholder={t('password')}
+              className="w-full pl-12 pr-4 py-4 bg-gray-100 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 outline-none"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+            />
           </div>
-        )}
+          <button 
+            type="submit"
+            disabled={loading}
+            className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-colors disabled:opacity-50"
+          >
+            {loading ? '...' : (isLogin ? t('login') : t('signup'))}
+          </button>
+        </form>
 
         <div className="flex items-center gap-4 my-8">
           <div className="flex-1 h-px bg-gray-100"></div>
@@ -705,6 +633,7 @@ const WorkerListView = ({ currentUser }: { currentUser: FirebaseUser | null }) =
   
   const [workers, setWorkers] = useState<(WorkerProfile & { userLocation: string })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [selectedDistrict, setSelectedDistrict] = useState(initialDistrict);
   const [selectedArea, setSelectedArea] = useState(initialArea);
 
@@ -731,6 +660,16 @@ const WorkerListView = ({ currentUser }: { currentUser: FirebaseUser | null }) =
   }, [search]);
 
   useEffect(() => {
+    const fetchProfile = async () => {
+      if (currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+        if (userDoc.exists()) {
+          setProfile(userDoc.data() as UserProfile);
+        }
+      }
+    };
+    fetchProfile();
+
     let q = query(collection(db, 'workers'), where('availability', '==', true));
     if (category) {
       q = query(q, where('skills', 'array-contains', category));
@@ -751,7 +690,7 @@ const WorkerListView = ({ currentUser }: { currentUser: FirebaseUser | null }) =
     });
 
     return () => unsubscribe();
-  }, [category]);
+  }, [category, currentUser]);
 
   const filteredWorkers = useMemo(() => {
     return workers.filter(w => {
@@ -770,9 +709,8 @@ const WorkerListView = ({ currentUser }: { currentUser: FirebaseUser | null }) =
   }, [workers, selectedDistrict, selectedArea, search]);
 
   const handleWorkerClick = (workerUid: string) => {
-    if (!currentUser) {
-      toast.error('Please login to view worker details');
-      navigate('/login');
+    if (profile?.role === 'worker' && currentUser?.uid !== workerUid) {
+      toast.error('Workers cannot view other workers details');
       return;
     }
     navigate(`/worker/${workerUid}`);
@@ -882,16 +820,12 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
   const { id } = useParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [worker, setWorker] = useState<(WorkerProfile & { name: string, phone: string }) | null>(null);
+  const [worker, setWorker] = useState<WorkerProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasApprovedBooking, setHasApprovedBooking] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
   useEffect(() => {
-    if (!currentUser) {
-      toast.error('Please login to view worker details');
-      navigate('/login');
-      return;
-    }
-
     if (!id) return;
     const fetchWorker = async () => {
       try {
@@ -899,6 +833,32 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
         if (workerDoc.exists()) {
           setWorker(workerDoc.data() as WorkerProfile);
         }
+
+        if (currentUser) {
+          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+          if (userDoc.exists()) {
+            const profileData = userDoc.data() as UserProfile;
+            setProfile(profileData);
+
+            // Restrict worker to worker details
+            if (profileData.role === 'worker' && id !== currentUser.uid) {
+              toast.error('Workers cannot view other worker profiles');
+              navigate('/');
+              return;
+            }
+          }
+
+          // Check for approved booking
+          const q = query(
+            collection(db, 'bookings'), 
+            where('customerId', '==', currentUser.uid),
+            where('workerId', '==', id),
+            where('adminApproved', '==', true)
+          );
+          const bookingSnap = await getDocs(q);
+          setHasApprovedBooking(!bookingSnap.empty);
+        }
+
         setLoading(false);
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, `workers/${id}`);
@@ -910,9 +870,16 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
   const handleBooking = async () => {
     if (!currentUser) {
       toast.error('Please login to book');
+      navigate('/login');
       return;
     }
     if (!worker) return;
+
+    if (profile?.subscriptionStatus !== 'active' && profile?.subscriptionStatus !== 'trialing') {
+      toast.error('Please subscribe to book workers');
+      navigate('/subscription');
+      return;
+    }
 
     try {
       const bookingData = {
@@ -920,6 +887,7 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
         workerId: worker.uid,
         service: worker.skills[0],
         status: 'pending',
+        adminApproved: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
@@ -998,20 +966,31 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
             <Phone size={20} className="text-gray-400" />
             <div>
               <div className="text-xs text-gray-500">{t('mobile_number')}</div>
-              <div className="font-bold text-gray-900">{worker.phone}</div>
+              <div className="font-bold text-gray-900">
+                {currentUser ? worker.phone : '••••••••••'}
+              </div>
             </div>
           </div>
-          <a 
-            href={`tel:${worker.phone}`}
-            className="p-3 bg-white text-orange-600 rounded-xl shadow-sm border border-gray-100 hover:bg-orange-50 transition-colors"
-          >
-            <Phone size={20} />
-          </a>
+          {currentUser && (
+            <a 
+              href={`tel:${worker.phone}`}
+              className="p-3 bg-white text-orange-600 rounded-xl shadow-sm border border-gray-100 hover:bg-orange-50 transition-colors"
+            >
+              <Phone size={20} />
+            </a>
+          )}
         </div>
 
         <div className="flex gap-3">
           <button 
-            onClick={() => navigate(`/chat/${worker.uid}`)}
+            onClick={() => {
+              if (currentUser) {
+                navigate(`/chat/${worker.uid}`);
+              } else {
+                toast.error('Please login to chat with workers');
+                navigate('/login');
+              }
+            }}
             className="flex-1 flex items-center justify-center gap-2 py-4 bg-gray-100 text-gray-900 rounded-2xl font-bold hover:bg-gray-200 transition-colors"
           >
             <MessageSquare size={20} />
@@ -1043,6 +1022,7 @@ const WorkerProfileView = ({ currentUser }: { currentUser: FirebaseUser | null }
 const JoinWorkerForm = ({ currentUser }: { currentUser: FirebaseUser | null }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     fullName: '',
     phone: '',
@@ -1074,9 +1054,11 @@ const JoinWorkerForm = ({ currentUser }: { currentUser: FirebaseUser | null }) =
     e.preventDefault();
     if (!currentUser) {
       toast.error('Please login first');
+      navigate('/login');
       return;
     }
 
+    setLoading(true);
     try {
       const workerData = {
         uid: currentUser.uid,
@@ -1105,6 +1087,8 @@ const JoinWorkerForm = ({ currentUser }: { currentUser: FirebaseUser | null }) =
       navigate('/');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `workers/${currentUser.uid}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1217,9 +1201,10 @@ const JoinWorkerForm = ({ currentUser }: { currentUser: FirebaseUser | null }) =
 
         <button 
           type="submit"
-          className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 mt-4 hover:bg-orange-700 transition-colors"
+          disabled={loading}
+          className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 mt-4 hover:bg-orange-700 transition-colors disabled:opacity-50"
         >
-          {t('submit')}
+          {loading ? '...' : t('submit')}
         </button>
       </form>
     </div>
@@ -1234,9 +1219,179 @@ const BookingsView = ({ currentUser }: { currentUser: FirebaseUser | null }) => 
   useEffect(() => {
     if (!currentUser) return;
 
-    // We need to query where customerId == uid OR workerId == uid
-    // Firestore doesn't support OR across fields easily without multiple queries or composite indexes
-    // For simplicity in MVP, we'll fetch both and combine
+    let q;
+    if (currentUser.email === 'vasu.kannaluri@gmail.com') {
+      // Admin sees all bookings
+      q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'));
+      const unsubscribe = onSnapshot(q, async (snap) => {
+        const b = await Promise.all(snap.docs.map(async d => {
+          const data = d.data() as Booking;
+          const workerDoc = await getDoc(doc(db, 'users', data.workerId));
+          const customerDoc = await getDoc(doc(db, 'users', data.customerId));
+          return { 
+            ...data, 
+            id: d.id, 
+            otherPartyName: `From: ${customerDoc.data()?.name || 'Customer'} To: ${workerDoc.data()?.name || 'Worker'}` 
+          };
+        }));
+        setBookings(b);
+        setLoading(false);
+      });
+      return () => unsubscribe();
+    } else {
+      // Regular user/worker sees their own
+      const q1 = query(collection(db, 'bookings'), where('customerId', '==', currentUser.uid));
+      const q2 = query(collection(db, 'bookings'), where('workerId', '==', currentUser.uid));
+
+      const unsub1 = onSnapshot(q1, async (snap) => {
+        const b1 = await Promise.all(snap.docs.map(async d => {
+          const data = d.data() as Booking;
+          const workerDoc = await getDoc(doc(db, 'users', data.workerId));
+          return { ...data, id: d.id, otherPartyName: workerDoc.data()?.name || 'Worker' };
+        }));
+        setBookings(prev => {
+          const filtered = prev.filter(b => b.workerId === currentUser.uid);
+          const combined = [...filtered, ...b1];
+          const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+          return unique.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        });
+        setLoading(false);
+      });
+
+      const unsub2 = onSnapshot(q2, async (snap) => {
+        const b2 = await Promise.all(snap.docs.map(async d => {
+          const data = d.data() as Booking;
+          const customerDoc = await getDoc(doc(db, 'users', data.customerId));
+          return { ...data, id: d.id, otherPartyName: customerDoc.data()?.name || 'Customer' };
+        }));
+        setBookings(prev => {
+          const filtered = prev.filter(b => b.customerId === currentUser.uid);
+          const combined = [...filtered, ...b2];
+          const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+          return unique.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        });
+        setLoading(false);
+      });
+
+      return () => { unsub1(); unsub2(); };
+    }
+  }, [currentUser]);
+
+  const updateStatus = async (id: string, newStatus: string) => {
+    try {
+      await updateDoc(doc(db, 'bookings', id), { 
+        status: newStatus,
+        updatedAt: serverTimestamp()
+      });
+      toast.success(`Status updated to ${newStatus}`);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `bookings/${id}`);
+    }
+  };
+
+  const approveBooking = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'bookings', id), { 
+        adminApproved: true,
+        updatedAt: serverTimestamp()
+      });
+      toast.success('Booking approved by Admin');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `bookings/${id}`);
+    }
+  };
+
+  return (
+    <div className="pt-20 pb-24 px-4 max-w-lg mx-auto">
+      <h1 className="text-2xl font-bold mb-6">{t('my_bookings')}</h1>
+      {loading ? (
+        <div>Loading...</div>
+      ) : (
+        <div className="space-y-4">
+          {bookings.map(booking => (
+            <div key={booking.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+              <div className="flex justify-between items-start mb-3">
+                <div>
+                  <h3 className="font-bold text-gray-900">{booking.service}</h3>
+                  <p className="text-sm text-gray-500">{booking.otherPartyName}</p>
+                </div>
+                <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                  booking.status === 'completed' ? 'bg-green-100 text-green-700' :
+                  booking.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                  'bg-blue-100 text-blue-700'
+                }`}>
+                  {t(booking.status)}
+                </span>
+              </div>
+
+              <div className="mb-4">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  booking.adminApproved ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
+                }`}>
+                  {booking.adminApproved ? 'Admin Approved' : 'Pending Admin Approval'}
+                </span>
+              </div>
+              
+              {currentUser?.email === 'vasu.kannaluri@gmail.com' && !booking.adminApproved && (
+                <button 
+                  onClick={() => approveBooking(booking.id)}
+                  className="w-full mb-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold shadow-md"
+                >
+                  Approve as Admin
+                </button>
+              )}
+
+              {currentUser?.uid === booking.workerId && booking.status === 'pending' && booking.adminApproved && (
+                <div className="flex gap-2 mt-4">
+                  <button 
+                    onClick={() => updateStatus(booking.id, 'accepted')}
+                    className="flex-1 py-2 bg-orange-600 text-white rounded-xl text-sm font-bold"
+                  >
+                    Accept
+                  </button>
+                  <button 
+                    onClick={() => updateStatus(booking.id, 'cancelled')}
+                    className="flex-1 py-2 bg-gray-100 text-gray-600 rounded-xl text-sm font-bold"
+                  >
+                    Decline
+                  </button>
+                </div>
+              )}
+
+              {booking.status === 'accepted' && booking.adminApproved && (
+                <button 
+                  onClick={() => updateStatus(booking.id, 'in-progress')}
+                  className="w-full mt-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold"
+                >
+                  Start Work
+                </button>
+              )}
+
+              {booking.status === 'in-progress' && booking.adminApproved && (
+                <button 
+                  onClick={() => updateStatus(booking.id, 'completed')}
+                  className="w-full mt-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold"
+                >
+                  Mark Completed
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const BookingHistoryView = ({ currentUser }: { currentUser: FirebaseUser | null }) => {
+  const { t } = useTranslation();
+  const [bookings, setBookings] = useState<(Booking & { otherPartyName: string })[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'current' | 'past' | 'cancelled'>('current');
+
+  useEffect(() => {
+    if (!currentUser) return;
+
     const q1 = query(collection(db, 'bookings'), where('customerId', '==', currentUser.uid));
     const q2 = query(collection(db, 'bookings'), where('workerId', '==', currentUser.uid));
 
@@ -1269,77 +1424,122 @@ const BookingsView = ({ currentUser }: { currentUser: FirebaseUser | null }) => 
     return () => { unsub1(); unsub2(); };
   }, [currentUser]);
 
-  const updateStatus = async (id: string, newStatus: string) => {
+  const filteredBookings = useMemo(() => {
+    if (activeTab === 'current') {
+      return bookings.filter(b => ['pending', 'accepted', 'in-progress'].includes(b.status));
+    } else if (activeTab === 'past') {
+      return bookings.filter(b => b.status === 'completed');
+    } else {
+      return bookings.filter(b => b.status === 'cancelled');
+    }
+  }, [bookings, activeTab]);
+
+  const handleRate = async (bookingId: string, workerId: string, rating: number) => {
     try {
-      await updateDoc(doc(db, 'bookings', id), { 
-        status: newStatus,
-        updatedAt: serverTimestamp()
-      });
-      toast.success(`Status updated to ${newStatus}`);
+      await updateDoc(doc(db, 'bookings', bookingId), { rating });
+      
+      const workerRef = doc(db, 'workers', workerId);
+      const workerSnap = await getDoc(workerRef);
+      if (workerSnap.exists()) {
+        const data = workerSnap.data() as WorkerProfile;
+        const newReviewCount = (data.reviewCount || 0) + 1;
+        const newRating = ((data.rating || 0) * (data.reviewCount || 0) + rating) / newReviewCount;
+        
+        await updateDoc(workerRef, {
+          rating: Number(newRating.toFixed(1)),
+          reviewCount: newReviewCount
+        });
+      }
+      toast.success(t('rating_submitted'));
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `bookings/${id}`);
+      handleFirestoreError(error, OperationType.UPDATE, `bookings/${bookingId}`);
     }
   };
 
   return (
     <div className="pt-20 pb-24 px-4 max-w-lg mx-auto">
-      <h1 className="text-2xl font-bold mb-6">{t('my_bookings')}</h1>
+      <h1 className="text-2xl font-bold mb-6">{t('booking_history')}</h1>
+      
+      <div className="flex gap-2 mb-6 p-1 bg-gray-100 rounded-2xl">
+        {(['current', 'past', 'cancelled'] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`flex-1 py-2 rounded-xl text-sm font-bold transition-all ${
+              activeTab === tab ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500'
+            }`}
+          >
+            {t(`${tab}_bookings`)}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
-        <div>Loading...</div>
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600"></div>
+        </div>
       ) : (
         <div className="space-y-4">
-          {bookings.map(booking => (
-            <div key={booking.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-              <div className="flex justify-between items-start mb-3">
-                <div>
-                  <h3 className="font-bold text-gray-900">{booking.service}</h3>
-                  <p className="text-sm text-gray-500">{booking.otherPartyName}</p>
-                </div>
-                <span className={`text-xs font-bold px-3 py-1 rounded-full ${
-                  booking.status === 'completed' ? 'bg-green-100 text-green-700' :
-                  booking.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                  'bg-blue-100 text-blue-700'
-                }`}>
-                  {t(booking.status)}
-                </span>
-              </div>
-              
-              {currentUser?.uid === booking.workerId && booking.status === 'pending' && (
-                <div className="flex gap-2 mt-4">
-                  <button 
-                    onClick={() => updateStatus(booking.id, 'accepted')}
-                    className="flex-1 py-2 bg-orange-600 text-white rounded-xl text-sm font-bold"
-                  >
-                    Accept
-                  </button>
-                  <button 
-                    onClick={() => updateStatus(booking.id, 'cancelled')}
-                    className="flex-1 py-2 bg-gray-100 text-gray-600 rounded-xl text-sm font-bold"
-                  >
-                    Decline
-                  </button>
-                </div>
-              )}
-
-              {booking.status === 'accepted' && (
-                <button 
-                  onClick={() => updateStatus(booking.id, 'in-progress')}
-                  className="w-full mt-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-bold"
-                >
-                  Start Work
-                </button>
-              )}
-
-              {booking.status === 'in-progress' && (
-                <button 
-                  onClick={() => updateStatus(booking.id, 'completed')}
-                  className="w-full mt-4 py-2 bg-green-600 text-white rounded-xl text-sm font-bold"
-                >
-                  Mark Completed
-                </button>
-              )}
+          {filteredBookings.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-gray-200">
+              <Clock className="mx-auto text-gray-300 mb-2" size={48} />
+              <p className="text-gray-500">{t('no_bookings')}</p>
             </div>
-          ))}
+          ) : (
+            filteredBookings.map(booking => (
+              <div key={booking.id} className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-lg">{booking.service}</h3>
+                    <p className="text-sm text-gray-500">{booking.otherPartyName}</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {booking.createdAt?.toDate ? booking.createdAt.toDate().toLocaleDateString() : 'Recent'}
+                    </p>
+                  </div>
+                  <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                    booking.status === 'completed' ? 'bg-green-100 text-green-700' :
+                    booking.status === 'cancelled' ? 'bg-red-100 text-red-700' :
+                    'bg-blue-100 text-blue-700'
+                  }`}>
+                    {t(booking.status)}
+                  </span>
+                </div>
+
+                {booking.status === 'completed' && currentUser?.uid === booking.customerId && !booking.rating && (
+                  <div className="mt-4 pt-4 border-t border-gray-50">
+                    <p className="text-sm font-bold text-gray-700 mb-3">{t('rate_worker')}</p>
+                    <div className="flex gap-2">
+                      {[1, 2, 3, 4, 5].map(star => (
+                        <button
+                          key={star}
+                          onClick={() => handleRate(booking.id, booking.workerId, star)}
+                          className="p-1 text-gray-300 hover:text-yellow-400 transition-colors"
+                        >
+                          <Star size={24} fill="currentColor" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {booking.rating && (
+                  <div className="mt-4 pt-4 border-t border-gray-50 flex items-center gap-2">
+                    <span className="text-sm font-bold text-gray-700">{t('rating')}:</span>
+                    <div className="flex gap-1">
+                      {[1, 2, 3, 4, 5].map(star => (
+                        <Star 
+                          key={star} 
+                          size={16} 
+                          fill={star <= booking.rating! ? "#EAB308" : "none"} 
+                          className={star <= booking.rating! ? "text-yellow-500" : "text-gray-300"}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>
@@ -1360,11 +1560,21 @@ const ChatView = ({ currentUser }: { currentUser: FirebaseUser | null }) => {
   }, [currentUser, otherId]);
 
   useEffect(() => {
-    if (!chatId || !otherId) return;
+    if (!chatId || !otherId || !currentUser) return;
 
     const fetchOther = async () => {
       const d = await getDoc(doc(db, 'users', otherId));
-      setOtherName(d.data()?.name || 'User');
+      const otherData = d.data() as UserProfile;
+      setOtherName(otherData?.name || 'User');
+
+      // Restrict worker to worker chat
+      const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+      const myData = userDoc.data() as UserProfile;
+      if (myData.role === 'worker' && otherData?.role === 'worker' && currentUser.uid !== otherId) {
+        toast.error('Workers cannot chat with other workers');
+        navigate('/');
+        return;
+      }
     };
     fetchOther();
 
@@ -1467,6 +1677,27 @@ const ProfileView = ({ user, profile }: { user: FirebaseUser | null, profile: Us
 
         <div className="space-y-4">
           <div>
+            <p className="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Subscription</p>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${profile?.subscriptionStatus === 'active' || profile?.subscriptionStatus === 'trialing' ? 'bg-green-500' : 'bg-gray-300'}`}></span>
+                <p className="font-medium text-gray-900 capitalize">{profile?.subscriptionStatus || 'None'}</p>
+              </div>
+              <button 
+                onClick={() => navigate('/subscription')}
+                className="text-sm font-bold text-orange-600 hover:text-orange-700"
+              >
+                {profile?.subscriptionStatus === 'active' || profile?.subscriptionStatus === 'trialing' ? 'Manage' : 'Upgrade'}
+              </button>
+            </div>
+            {profile?.trialEndDate && (profile?.subscriptionStatus === 'trialing' || profile?.subscriptionStatus === 'active') && (
+              <p className="text-[10px] text-gray-400 mt-1">
+                Trial ends: {profile.trialEndDate instanceof Date ? profile.trialEndDate.toLocaleDateString() : 
+                           profile.trialEndDate?.toDate ? profile.trialEndDate.toDate().toLocaleDateString() : 'Soon'}
+              </p>
+            )}
+          </div>
+          <div>
             <p className="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">{t('email')}</p>
             <p className="font-medium text-gray-900">{user?.email}</p>
           </div>
@@ -1485,6 +1716,14 @@ const ProfileView = ({ user, profile }: { user: FirebaseUser | null, profile: Us
             </div>
           )}
         </div>
+
+        <button 
+          onClick={() => navigate('/booking-history')}
+          className="w-full py-4 bg-gray-50 text-gray-700 rounded-2xl font-bold hover:bg-gray-100 transition-colors flex items-center justify-center gap-2"
+        >
+          <Clock size={20} />
+          {t('booking_history')}
+        </button>
 
         {profile?.role === 'customer' ? (
           <button 
@@ -1526,6 +1765,156 @@ const ProfileView = ({ user, profile }: { user: FirebaseUser | null, profile: Us
   );
 };
 
+const SubscriptionView = ({ currentUser, profile }: { currentUser: FirebaseUser | null, profile: UserProfile | null }) => {
+  const { t } = useTranslation();
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+
+  const handleSubscribe = async () => {
+    if (!currentUser) {
+      toast.error('Please login first');
+      navigate('/login');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: currentUser.uid,
+          email: currentUser.email,
+        }),
+      });
+
+      const session = await response.json();
+      if (session.url) {
+        window.location.href = session.url;
+      } else {
+        throw new Error(session.error || 'Failed to create checkout session');
+      }
+    } catch (error: any) {
+      console.error('Subscription error:', error);
+      toast.error(error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="pt-24 pb-32 px-6 max-w-lg mx-auto">
+      <div className="bg-white rounded-3xl p-8 border border-gray-100 shadow-sm text-center">
+        <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+          <Zap className="text-orange-600" size={32} />
+        </div>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Premium Subscription</h1>
+        <p className="text-gray-500 mb-8">Get unlimited access to all workers and priority support.</p>
+        
+        <div className="bg-gray-50 rounded-2xl p-6 mb-8 text-left">
+          <div className="flex items-center gap-3 mb-4">
+            <CheckCircle2 className="text-green-500" size={20} />
+            <span className="text-sm font-medium text-gray-700">7-Day Free Trial</span>
+          </div>
+          <div className="flex items-center gap-3 mb-4">
+            <CheckCircle2 className="text-green-500" size={20} />
+            <span className="text-sm font-medium text-gray-700">Unlimited Service Bookings</span>
+          </div>
+          <div className="flex items-center gap-3 mb-4">
+            <CheckCircle2 className="text-green-500" size={20} />
+            <span className="text-sm font-medium text-gray-700">Direct Chat with Workers</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="text-green-500" size={20} />
+            <span className="text-sm font-medium text-gray-700">Verified Worker Profiles</span>
+          </div>
+        </div>
+
+        <div className="mb-8">
+          <span className="text-4xl font-bold text-gray-900">₹99</span>
+          <span className="text-gray-500">/month</span>
+        </div>
+
+        <button
+          onClick={handleSubscribe}
+          disabled={loading}
+          className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-all disabled:opacity-50"
+        >
+          {loading ? 'Processing...' : 'Start 7-Day Free Trial'}
+        </button>
+        <p className="text-xs text-gray-400 mt-4">Cancel anytime. No commitment.</p>
+      </div>
+    </div>
+  );
+};
+
+const SuccessView = ({ currentUser }: { currentUser: FirebaseUser | null }) => {
+  const [searchParams] = useSearchParams();
+  const sessionId = searchParams.get('session_id');
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (currentUser && sessionId) {
+      // In a real app, you'd verify the session on the backend
+      // and update the user's subscription status in Firestore.
+      // For this demo, we'll update it directly.
+      const updateSubscription = async () => {
+        try {
+          await updateDoc(doc(db, 'users', currentUser.uid), {
+            subscriptionStatus: 'active',
+            trialEndDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days from now
+          });
+          toast.success('Subscription activated!');
+        } catch (error) {
+          console.error('Error updating subscription:', error);
+        }
+      };
+      updateSubscription();
+    }
+  }, [currentUser, sessionId]);
+
+  return (
+    <div className="pt-24 pb-32 px-6 max-w-lg mx-auto text-center">
+      <div className="bg-white rounded-3xl p-8 border border-gray-100 shadow-sm">
+        <div className="w-16 h-16 bg-green-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+          <CheckCircle2 className="text-green-600" size={32} />
+        </div>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h1>
+        <p className="text-gray-500 mb-8">Your premium subscription is now active. Enjoy all the benefits!</p>
+        <button
+          onClick={() => navigate('/')}
+          className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-all"
+        >
+          Go to Home
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const CancelView = () => {
+  const navigate = useNavigate();
+  return (
+    <div className="pt-24 pb-32 px-6 max-w-lg mx-auto text-center">
+      <div className="bg-white rounded-3xl p-8 border border-gray-100 shadow-sm">
+        <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
+          <X className="text-red-600" size={32} />
+        </div>
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">Payment Cancelled</h1>
+        <p className="text-gray-500 mb-8">Your payment was cancelled. No charges were made.</p>
+        <button
+          onClick={() => navigate('/subscription')}
+          className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold shadow-lg shadow-orange-200 hover:bg-orange-700 transition-all"
+        >
+          Try Again
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
@@ -1546,6 +1935,7 @@ export default function App() {
               role: 'customer',
               location: 'Nellore, AP',
               area: 'nellore_city',
+              subscriptionStatus: 'none',
               createdAt: serverTimestamp()
             };
             await setDoc(doc(db, 'users', u.uid), newProfile);
@@ -1588,6 +1978,10 @@ export default function App() {
               <Route path="/bookings" element={user ? <BookingsView currentUser={user} /> : <Navigate to="/" />} />
               <Route path="/chat/:id" element={user ? <ChatView currentUser={user} /> : <Navigate to="/" />} />
               <Route path="/profile" element={<ProfileView user={user} profile={profile} />} />
+              <Route path="/booking-history" element={user ? <BookingHistoryView currentUser={user} /> : <Navigate to="/" />} />
+              <Route path="/subscription" element={<SubscriptionView currentUser={user} profile={profile} />} />
+              <Route path="/subscription/success" element={<SuccessView currentUser={user} />} />
+              <Route path="/subscription/cancel" element={<CancelView />} />
             </Routes>
           </AnimatePresence>
 
