@@ -1,5 +1,4 @@
-import logo from './assests/Logo.png';
-
+import logo from './assests/logo.png';
 import React, { useState, useEffect, useMemo, ReactNode, useRef } from 'react';
 import { 
   BrowserRouter as Router, 
@@ -237,10 +236,10 @@ const LoginView = () => {
             src={logo} 
             alt="ReparoH Logo" 
             className="w-12 h-12 object-contain"
-            referrerPolicy="no-referrer"
+            {/* referrerPolicy="no-referrer"
             onError={(e) => {
               (e.target as HTMLImageElement).src = 'https://picsum.photos/seed/reparoh/100/100';
-            }}
+            }} */}
           />
         </div>
         <h1 className="text-2xl font-bold mb-2">{t('login')} / {t('signup')}</h1>
